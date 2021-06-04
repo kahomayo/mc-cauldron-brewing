@@ -1,7 +1,7 @@
 use crate::fungal::FungalAutomaton;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
-pub enum BasicPotionIngredient {
+pub enum PotionIngredient {
     Sugar,
     GhastTear,
     SpiderEye,
@@ -10,24 +10,27 @@ pub enum BasicPotionIngredient {
     MagmaCream,
 }
 
-impl BasicPotionIngredient {
+impl PotionIngredient {
+    /// Lists the bits that are set by this ingredient
     pub fn added_bits(self) -> &'static [u8] {
         match self {
-            BasicPotionIngredient::Sugar => &[0u8],
-            BasicPotionIngredient::GhastTear => &[11u8],
-            BasicPotionIngredient::SpiderEye => &[5u8, 7u8, 10u8],
-            BasicPotionIngredient::FermentedSpiderEye => &[9u8, 14u8],
-            BasicPotionIngredient::BlazePowder => &[14u8],
-            BasicPotionIngredient::MagmaCream => &[1u8, 6u8, 14u8],
+            PotionIngredient::Sugar => &[0u8],
+            PotionIngredient::GhastTear => &[11u8],
+            PotionIngredient::SpiderEye => &[5u8, 7u8, 10u8],
+            PotionIngredient::FermentedSpiderEye => &[9u8, 14u8],
+            PotionIngredient::BlazePowder => &[14u8],
+            PotionIngredient::MagmaCream => &[1u8, 6u8, 14u8],
         }
     }
 }
 
+/// Represents the liquidData of a Cauldron tile entity or the damage value of a potion item.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct LiquidData(pub u16);
 
 impl LiquidData {
-    pub fn apply_ingredient(self, ingredient: BasicPotionIngredient) -> Self {
+    /// Calculates the result of adding an ingredient
+    pub fn apply_ingredient(self, ingredient: PotionIngredient) -> Self {
         let mut result = self;
         for bit in ingredient.added_bits() {
             result.0 |= 1 << bit;
@@ -35,6 +38,9 @@ impl LiquidData {
         result
     }
 
+    /// Calculates the result of adding a water bucket
+    ///
+    /// To do this in-game, you have to first remove a layer using an empty bottle.
     pub fn dilute(self) -> Self {
         Self(
             self.0
@@ -42,50 +48,64 @@ impl LiquidData {
         )
     }
 
+    /// Calculates the result of adding a nether wart.
     pub fn apply_wart(self) -> Self {
-        self.apply_stage_1().apply_automaton()
+        self.apply_wart_stage_1().apply_automaton()
     }
 
-    fn apply_stage_1(self) -> Self {
+    /// The first step of wart handling.
+    fn apply_wart_stage_1(self) -> Self {
+        // If the lowest bit isn't set, return.
+        // lowest bit can be set by adding sugar, maybe also using warts?
         if self.0 & 1 == 0 {
             return self;
         }
+        // find the first occurence of '10' (from the right) in the data.
         let first_set = self.first_set();
         if first_set < 2 || (self.0 & (1 << first_set - 1)) != 0 {
             return self;
         }
+        // clear every bit that is left of that.
+        // e.g. '0011_1001' becomes '0000_1001'
         let mut res = self.0 & !(1 << first_set);
         res <<= 1;
         res |= 0b11 << first_set - 1;
         Self(res)
     }
 
+    /// Finds the position of the first bit that is set
     fn first_set(self) -> i32 {
         math::first_set(self.0)
     }
 
+    /// Applies the nether wart automaton
     fn apply_automaton(self) -> Self {
+        // Remove the first bit that is set
         let first_set = self.first_set();
         let without_leading_bits = if first_set >= 0 {
             self.0 & !(1 << first_set)
         } else {
             self.0
         };
+
+        // Run the fungal automaton until its output stops changing
         let evolved: u16 = {
             let mut next = FungalAutomaton::new(without_leading_bits);
             let mut current = FungalAutomaton::default();
             while current != next {
-                let new_next = next.next();
                 current = next;
-                next = new_next;
+                next = next.next();
             }
             current.into()
         };
+
+        // Add the bit that was removed above
         let result = if first_set >= 0 {
             evolved | 1 << first_set
         } else {
             evolved
         };
+
         Self(result)
     }
 }
@@ -93,8 +113,49 @@ impl LiquidData {
 mod fungal {
     use std::ops::{Index, IndexMut};
 
+    /// Represents the cellular automaton used for nether warts.
+    ///
+    /// There are 15 "cells" (bits), each of which can either be 1 or 0 (true or false).
     #[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Hash)]
     pub struct FungalAutomaton(WrappingArr<bool, 15>);
+
+    impl FungalAutomaton {
+        /// Calculates the next generation.
+        pub fn next(&self) -> Self {
+            let mut next_gen = Self::default();
+            for i in 0..15isize {
+                // The indices here wrap around
+                let should_set = if self[i] {
+                    (self[i + 1] || !self[i + 2]) && (self[i - 1] || !self[i - 2])
+                } else {
+                    self[i - 1] && self[i + 1]
+                };
+                next_gen[i] = should_set;
+            }
+            next_gen
+        }
+
+        /// Creates a fungal automaton from the bits in an integer.
+        pub fn new(v: u16) -> Self {
+            let mut res = Self::default();
+            for i in 0..15 {
+                res[i] = (v & (1 << i)) != 0;
+            }
+            res
+        }
+    }
+
+    impl Into<u16> for FungalAutomaton {
+        fn into(self) -> u16 {
+            let mut res = 0;
+            for i in 0..15 {
+                if self[i] {
+                    res |= 1 << i;
+                }
+            }
+            res
+        }
+    }
 
     #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
     struct WrappingArr<T, const I: usize>(pub [T; I]);
@@ -122,41 +183,6 @@ mod fungal {
         }
     }
 
-    impl FungalAutomaton {
-        pub fn new(v: u16) -> Self {
-            let mut res = Self::default();
-            for i in 0..15 {
-                res[i] = (v & (1 << i)) != 0;
-            }
-            res
-        }
-
-        pub fn next(&self) -> Self {
-            let mut next_gen = Self::default();
-            for i in 0..15isize {
-                let should_set = if self[i] {
-                    (self[i + 1] || !self[i + 2]) && (self[i - 1] || !self[i - 2])
-                } else {
-                    self[i - 1] && self[i + 1]
-                };
-                next_gen[i] = should_set;
-            }
-            next_gen
-        }
-    }
-
-    impl Into<u16> for FungalAutomaton {
-        fn into(self) -> u16 {
-            let mut res = 0;
-            for i in 0..15 {
-                if self[i] {
-                    res |= 1 << i;
-                }
-            }
-            res
-        }
-    }
-
     impl Index<isize> for FungalAutomaton {
         type Output = bool;
 
@@ -172,7 +198,7 @@ mod fungal {
     }
 }
 
-pub(crate) mod math {
+mod math {
     pub fn first_set(v: u16) -> i32 {
         15 - (v.leading_zeros() as i32)
     }
@@ -180,10 +206,8 @@ pub(crate) mod math {
 
 #[cfg(test)]
 mod tests {
-    use crate::BasicPotionIngredient::{
-        BlazePowder, FermentedSpiderEye, MagmaCream, SpiderEye, Sugar,
-    };
     use crate::LiquidData;
+    use crate::PotionIngredient::{BlazePowder, FermentedSpiderEye, MagmaCream, SpiderEye, Sugar};
 
     #[test]
     fn potion_w_is_correct() {
