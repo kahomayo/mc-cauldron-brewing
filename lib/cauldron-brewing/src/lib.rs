@@ -24,7 +24,7 @@ impl BasicPotionIngredient {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
-pub struct LiquidData(pub u32);
+pub struct LiquidData(pub u16);
 
 impl LiquidData {
     pub fn apply_ingredient(self, ingredient: BasicPotionIngredient) -> Self {
@@ -32,7 +32,6 @@ impl LiquidData {
         for bit in ingredient.added_bits() {
             result.0 |= 1 << bit;
         }
-        result.0 &= u16::MAX as u32;
         result
     }
 
@@ -51,14 +50,14 @@ impl LiquidData {
         if self.0 & 1 == 0 {
             return self;
         }
-        let first_clear = self.first_set();
-        if first_clear < 2 || (self.0 & (1 << first_clear - 1)) != 0 {
+        let first_set = self.first_set();
+        if first_set < 2 || (self.0 & (1 << first_set - 1)) != 0 {
             return self;
         }
-        let mut res = self.0 & !(1 << first_clear);
+        let mut res = self.0 & !(1 << first_set);
         res <<= 1;
-        res |= 0b11 << first_clear - 1;
-        Self(res & u16::MAX as u32)
+        res |= 0b11 << first_set - 1;
+        Self(res)
     }
 
     fn first_set(self) -> i32 {
@@ -66,13 +65,13 @@ impl LiquidData {
     }
 
     fn apply_automaton(self) -> Self {
-        let first_clear = self.first_set();
-        let without_leading_bits = if first_clear >= 0 {
-            self.0 & !(1 << first_clear)
+        let first_set = self.first_set();
+        let without_leading_bits = if first_set >= 0 {
+            self.0 & !(1 << first_set)
         } else {
             self.0
         };
-        let evolved: u32 = {
+        let evolved: u16 = {
             let mut next = FungalAutomaton::new(without_leading_bits);
             let mut current = FungalAutomaton::default();
             while current != next {
@@ -82,12 +81,12 @@ impl LiquidData {
             }
             current.into()
         };
-        let result = if first_clear >= 0 {
-            evolved | 1 << first_clear
+        let result = if first_set >= 0 {
+            evolved | 1 << first_set
         } else {
             evolved
         };
-        Self(result & u16::MAX as u32)
+        Self(result)
     }
 }
 
@@ -124,7 +123,7 @@ mod fungal {
     }
 
     impl FungalAutomaton {
-        pub fn new(v: u32) -> Self {
+        pub fn new(v: u16) -> Self {
             let mut res = Self::default();
             for i in 0..15 {
                 res[i] = (v & (1 << i)) != 0;
@@ -136,7 +135,7 @@ mod fungal {
             let mut next_gen = Self::default();
             for i in 0..15isize {
                 let should_set = if self[i] {
-                    !((!self[i + 1] && self[i + 2]) || (!self[i - 1] && self[i - 2]))
+                    (self[i + 1] || !self[i + 2]) && (self[i - 1] || !self[i - 2])
                 } else {
                     self[i - 1] && self[i + 1]
                 };
@@ -146,8 +145,8 @@ mod fungal {
         }
     }
 
-    impl Into<u32> for FungalAutomaton {
-        fn into(self) -> u32 {
+    impl Into<u16> for FungalAutomaton {
+        fn into(self) -> u16 {
             let mut res = 0;
             for i in 0..15 {
                 if self[i] {
@@ -174,8 +173,8 @@ mod fungal {
 }
 
 pub(crate) mod math {
-    pub fn first_set(v: u32) -> i32 {
-        31 - (v.leading_zeros() as i32)
+    pub fn first_set(v: u16) -> i32 {
+        15 - (v.leading_zeros() as i32)
     }
 }
 
