@@ -8,4 +8,3 @@ edition = "2018"
 
 [dependencies]
 mc-cauldron-brew = { path = "../mc-cauldron-brew" }
-typed-arena = "2.0.1"
