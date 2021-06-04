@@ -51,7 +51,7 @@ impl LiquidData {
         if self.0 & 1 == 0 {
             return self;
         }
-        let first_clear = self.first_clear();
+        let first_clear = self.first_set();
         if first_clear < 2 || (self.0 & (1 << first_clear - 1)) != 0 {
             return self;
         }
@@ -61,26 +61,26 @@ impl LiquidData {
         Self(res & u16::MAX as u32)
     }
 
-    fn first_clear(self) -> i32 {
-        math::first_clear(0xffff_8000 | self.0)
+    fn first_set(self) -> i32 {
+        math::first_set(self.0)
     }
 
     fn apply_automaton(self) -> Self {
-        let first_clear = self.first_clear();
+        let first_clear = self.first_set();
         let without_leading_bits = if first_clear >= 0 {
             self.0 & !(1 << first_clear)
         } else {
             self.0
         };
         let evolved: u32 = {
-            let mut curr = FungalAutomaton::new(without_leading_bits);
-            let mut next = FungalAutomaton::default();
-            while curr != next {
-                let new = curr.next();
-                curr = next;
-                next = new;
+            let mut next = FungalAutomaton::new(without_leading_bits);
+            let mut current = FungalAutomaton::default();
+            while current != next {
+                let new_next = next.next();
+                current = next;
+                next = new_next;
             }
-            curr.into()
+            current.into()
         };
         let result = if first_clear >= 0 {
             evolved | 1 << first_clear
@@ -100,17 +100,17 @@ mod fungal {
     #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
     struct WrappingArr<T, const I: usize>(pub [T; I]);
 
-    impl<T, const I: usize> Index<usize> for WrappingArr<T, I> {
+    impl<T, const I: usize> Index<isize> for WrappingArr<T, I> {
         type Output = T;
 
-        fn index(&self, index: usize) -> &Self::Output {
-            &self.0[index % I]
+        fn index(&self, index: isize) -> &Self::Output {
+            &self.0[index.rem_euclid(I as isize) as usize]
         }
     }
 
-    impl<T, const I: usize> IndexMut<usize> for WrappingArr<T, I> {
-        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-            &mut self.0[index % I]
+    impl<T, const I: usize> IndexMut<isize> for WrappingArr<T, I> {
+        fn index_mut(&mut self, index: isize) -> &mut Self::Output {
+            &mut self.0[index.rem_euclid(I as isize) as usize]
         }
     }
 
@@ -127,16 +127,16 @@ mod fungal {
         pub fn new(v: u32) -> Self {
             let mut res = Self::default();
             for i in 0..15 {
-                res[i] = v & (1 << i) == 1;
+                res[i] = (v & (1 << i)) != 0;
             }
             res
         }
 
         pub fn next(&self) -> Self {
             let mut next_gen = Self::default();
-            for i in 0..15 {
+            for i in 0..15isize {
                 let should_set = if self[i] {
-                    (self[i + 1] || !self[i + 2]) && (self[i - 1] || !self[i - 2])
+                    !((!self[i + 1] && self[i + 2]) || (!self[i - 1] && self[i - 2]))
                 } else {
                     self[i - 1] && self[i + 1]
                 };
@@ -158,43 +158,95 @@ mod fungal {
         }
     }
 
-    impl Index<usize> for FungalAutomaton {
+    impl Index<isize> for FungalAutomaton {
         type Output = bool;
 
-        fn index(&self, index: usize) -> &Self::Output {
+        fn index(&self, index: isize) -> &Self::Output {
             self.0.index(index)
         }
     }
 
-    impl IndexMut<usize> for FungalAutomaton {
-        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+    impl IndexMut<isize> for FungalAutomaton {
+        fn index_mut(&mut self, index: isize) -> &mut Self::Output {
             self.0.index_mut(index)
         }
     }
 }
 
 pub(crate) mod math {
-    pub fn first_clear(v: u32) -> i32 {
-        31 - (v.leading_ones() as i32)
+    pub fn first_set(v: u32) -> i32 {
+        31 - (v.leading_zeros() as i32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::BasicPotionIngredient::{
+        BlazePowder, FermentedSpiderEye, MagmaCream, SpiderEye, Sugar,
+    };
+    use crate::{BasicPotionIngredient, LiquidData};
+
+    #[test]
+    fn potion_w_is_correct() {
+        assert_eq!(LiquidData::default().dilute().0, 0);
     }
 
-    #[cfg(test)]
-    mod tests {
-        use crate::math::first_clear;
+    #[test]
+    fn potion_water_fermented_is_correct() {
+        assert_eq!(
+            LiquidData::default()
+                .dilute()
+                .apply_ingredient(FermentedSpiderEye)
+                .0,
+            16896
+        );
+    }
 
-        #[test]
-        fn first_clear_0_is_31() {
-            assert_eq!(first_clear(0), 31);
-        }
+    #[test]
+    fn potion_water_fermented_water_is_correct() {
+        assert_eq!(
+            LiquidData::default()
+                .dilute()
+                .apply_ingredient(FermentedSpiderEye)
+                .dilute()
+                .0,
+            16384
+        );
+    }
 
-        #[test]
-        fn first_clear_pot_is_14() {
-            assert_eq!(first_clear(0xffff_8000), 14);
-        }
+    #[test]
+    fn potion_water_eye_is_correct() {
+        assert_eq!(
+            LiquidData::default().dilute().apply_ingredient(SpiderEye).0,
+            1184
+        );
+    }
 
-        #[test]
-        fn first_clear_max_is_m1() {
-            assert_eq!(first_clear(0xffff_ffff), -1);
-        }
+    #[test]
+    fn potion_water_eye_wart_is_correct() {
+        assert_eq!(
+            LiquidData::default()
+                .dilute()
+                .apply_ingredient(SpiderEye)
+                .apply_wart()
+                .0,
+            1088
+        );
+    }
+
+    #[test]
+    fn potion_water_eye_fermented_blaze_magma_sugar_wart_is_correct() {
+        assert_eq!(
+            LiquidData::default()
+                .dilute()
+                .apply_ingredient(SpiderEye)
+                .apply_ingredient(FermentedSpiderEye)
+                .apply_ingredient(BlazePowder)
+                .apply_ingredient(MagmaCream)
+                .apply_ingredient(Sugar)
+                .apply_wart()
+                .0,
+            20614
+        );
     }
 }
