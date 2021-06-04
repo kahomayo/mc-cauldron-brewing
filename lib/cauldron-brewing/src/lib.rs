@@ -184,7 +184,7 @@ mod tests {
     use crate::BasicPotionIngredient::{
         BlazePowder, FermentedSpiderEye, MagmaCream, SpiderEye, Sugar,
     };
-    use crate::{BasicPotionIngredient, LiquidData};
+    use crate::LiquidData;
 
     #[test]
     fn potion_w_is_correct() {
@@ -247,6 +247,41 @@ mod tests {
                 .apply_wart()
                 .0,
             20614
+        );
+    }
+
+    #[test]
+    fn potion_water_eye_fermented_blaze_magma_sugar_wart_water_is_correct() {
+        assert_eq!(
+            LiquidData::default()
+                .dilute()
+                .apply_ingredient(SpiderEye)
+                .apply_ingredient(FermentedSpiderEye)
+                .apply_ingredient(BlazePowder)
+                .apply_ingredient(MagmaCream)
+                .apply_ingredient(Sugar)
+                .apply_wart()
+                .dilute()
+                .0,
+            20484
+        );
+    }
+
+    #[test]
+    fn potion_water_eye_fermented_blaze_magma_sugar_wart_water_sugar_is_correct() {
+        assert_eq!(
+            LiquidData::default()
+                .dilute()
+                .apply_ingredient(SpiderEye)
+                .apply_ingredient(FermentedSpiderEye)
+                .apply_ingredient(BlazePowder)
+                .apply_ingredient(MagmaCream)
+                .apply_ingredient(Sugar)
+                .apply_wart()
+                .dilute()
+                .apply_ingredient(Sugar)
+                .0,
+            20485
         );
     }
 }
