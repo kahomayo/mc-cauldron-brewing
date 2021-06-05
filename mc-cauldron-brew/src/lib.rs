@@ -60,7 +60,7 @@ impl LiquidData {
         if self.0 & 1 == 0 {
             return self;
         }
-        // find the first occurence of '10' (from the right) in the data.
+        // find the first occurrence of '10' (from the right) in the data.
         let first_set = self.first_set();
         if first_set < 2 || (self.0 & (1 << first_set - 1)) != 0 {
             return self;
@@ -111,13 +111,9 @@ impl LiquidData {
 }
 
 mod fungal {
-    use std::ops::{Index, IndexMut};
-
     /// Represents the cellular automaton used for nether warts.
-    ///
-    /// There are 15 "cells" (bits), each of which can either be 1 or 0 (true or false).
     #[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Hash)]
-    pub struct FungalAutomaton(WrappingArr<bool, 15>);
+    pub struct FungalAutomaton(pub u16);
 
     impl FungalAutomaton {
         /// Calculates the next generation.
@@ -125,75 +121,60 @@ mod fungal {
             let mut next_gen = Self::default();
             for i in 0..15isize {
                 // The indices here wrap around
-                let should_set = if self[i] {
-                    (self[i + 1] || !self[i + 2]) && (self[i - 1] || !self[i - 2])
+                let bit = if self.at(i) {
+                    (self.at(i + 1) || !self.at(i + 2)) && (self.at(i - 1) || !self.at(i - 2))
                 } else {
-                    self[i - 1] && self[i + 1]
+                    self.at(i - 1) && self.at(i + 1)
                 };
-                next_gen[i] = should_set;
+                next_gen.set(i, bit);
             }
             next_gen
         }
 
         /// Creates a fungal automaton from the bits in an integer.
         pub fn new(v: u16) -> Self {
-            let mut res = Self::default();
-            for i in 0..15 {
-                res[i] = (v & (1 << i)) != 0;
+            Self(v)
+        }
+
+        pub fn as_u16(self) -> u16 {
+            self.0
+        }
+
+        fn at(&self, index: isize) -> bool {
+            let shift = (index % 15) & 0x1f;
+            if shift < 16 {
+                self.0 & (1 << shift) != 0
+            } else {
+                false
             }
-            res
+        }
+
+        fn set(&mut self, index: isize, v: bool) {
+            if v {
+                self.0 |= (v as u16) << index;
+            }
         }
     }
 
     impl Into<u16> for FungalAutomaton {
         fn into(self) -> u16 {
-            let mut res = 0;
-            for i in 0..15 {
-                if self[i] {
-                    res |= 1 << i;
-                }
-            }
-            res
+            self.as_u16()
         }
     }
+    #[cfg(test)]
+    mod tests {
+        use crate::fungal::FungalAutomaton;
 
-    #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
-    struct WrappingArr<T, const I: usize>(pub [T; I]);
-
-    impl<T, const I: usize> Index<isize> for WrappingArr<T, I> {
-        type Output = T;
-
-        fn index(&self, index: isize) -> &Self::Output {
-            &self.0[index.rem_euclid(I as isize) as usize]
+        #[test]
+        fn negative_overflow_is_correct() {
+            assert_eq!(FungalAutomaton::new(14627).at(-1), false, "index -1");
+            assert_eq!(FungalAutomaton::new(14627).at(-2), false, "index -2");
         }
-    }
 
-    impl<T, const I: usize> IndexMut<isize> for WrappingArr<T, I> {
-        fn index_mut(&mut self, index: isize) -> &mut Self::Output {
-            &mut self.0[index.rem_euclid(I as isize) as usize]
-        }
-    }
-
-    impl<T, const I: usize> Default for WrappingArr<T, I>
-    where
-        [T; I]: Default,
-    {
-        fn default() -> Self {
-            Self(Default::default())
-        }
-    }
-
-    impl Index<isize> for FungalAutomaton {
-        type Output = bool;
-
-        fn index(&self, index: isize) -> &Self::Output {
-            self.0.index(index)
-        }
-    }
-
-    impl IndexMut<isize> for FungalAutomaton {
-        fn index_mut(&mut self, index: isize) -> &mut Self::Output {
-            self.0.index_mut(index)
+        #[test]
+        fn positive_overflow_is_correct() {
+            assert_eq!(FungalAutomaton::new(14627).at(13 + 1), false, "index 13+1");
+            assert_eq!(FungalAutomaton::new(14627).at(13 + 2), true, "index 13+2");
         }
     }
 }
@@ -306,5 +287,10 @@ mod tests {
                 .0,
             20485
         );
+    }
+
+    #[test]
+    fn wart_to_31011_is_correct() {
+        assert_eq!(LiquidData(31011).apply_wart().0, 16675);
     }
 }
